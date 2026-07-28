@@ -1,0 +1,2197 @@
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Notification",
+    Text = "Adis Custom Script♥",
+    Duration = 5
+})
+
+local handler = require(game:GetService("ReplicatedStorage").Modules.GunHandler)
+local plrs = game:GetService("Players")
+local me = plrs.LocalPlayer
+local playerGui = me:WaitForChild("PlayerGui")
+local cam = workspace.CurrentCamera
+local mouse = me:GetMouse()
+local aimPart = "Head"
+local oldFunc = handler.getAim
+
+_G.FOV_RADIUS = 0
+_G.RevolverBypass = false
+_G.WallCheck = false
+_G.KnockCheck = false
+
+_G.CamLock_Enabled = false
+_G.CamLock_Smoothness = 0.1
+_G.CamLock_Key = Enum.KeyCode.V
+
+_G.ESP_Boxes = false
+_G.ESP_Names = false
+_G.ESP_Health = false
+_G.ESP_Color = Color3.fromRGB(170, 130, 255)
+
+_G.Speed_Enabled = false
+_G.Speed_Value = 50
+_G.Speed_Key = Enum.KeyCode.X
+_G.Speed_ToggleEnabled = false
+
+_G.JumpPower_Enabled = false
+_G.JumpPower_Value = 50
+_G.JumpPower_Key = Enum.KeyCode.Z
+_G.JumpPower_ToggleEnabled = false
+
+_G.Headless_Enabled = false
+_G.Whitelist = {}
+
+local function isWhitelisted(player)
+    if not player then return false end
+    for _, whitelisted in ipairs(_G.Whitelist) do
+        if whitelisted == player then
+            return true
+        end
+    end
+    return false
+end
+
+local function showWhitelistNotification(action, player)
+    if not player then return end
+
+    local playerName = player.DisplayName or player.Name or "player"
+    local text = action == "added" and (playerName .. " added to whitelist") or (playerName .. " removed from whitelist")
+
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "Whitelist",
+            Text = text,
+            Duration = 2
+        })
+    end)
+end
+
+local function toggleWhitelist(player)
+    if not player then return end
+    for i, whitelisted in ipairs(_G.Whitelist) do
+        if whitelisted == player then
+            table.remove(_G.Whitelist, i)
+            showWhitelistNotification("removed", player)
+            return
+        end
+    end
+    table.insert(_G.Whitelist, player)
+    showWhitelistNotification("added", player)
+end
+
+local _0xn1 = 100 local _0xn8 = 1 local _0xn9 = 0 local _0xn11 = 2 local _0xn14 = 0.05 local _0xn15 = -0.1 local _0xn16 = -0.05
+local _0x52a0d5 = { BulletSpread = { Enabled = true, Amount = 100 } }
+local _0x9ba38e
+local isCamLockBinding = false
+
+_0x9ba38e = hookfunction(math.random, function(...)
+    local _0x5e1a0d = { ... }
+    if checkcaller() then return _0x9ba38e(...) end
+    if (#_0x5e1a0d == _0xn9) or (_0x5e1a0d[_0xn8] == _0xn16 and _0x5e1a0d[_0xn11] == _0xn14) or (_0x5e1a0d[_0xn8] == _0xn15) or (_0x5e1a0d[_0xn8] == _0xn16) then
+        if _0x52a0d5.BulletSpread.Enabled then
+            return _0x9ba38e(...) * (_0x52a0d5.BulletSpread.Amount / _0xn1)
+        end
+    end
+    return _0x9ba38e(...)
+end)
+
+local function getClosestPart(char)
+    local closest = nil
+    local shortestDist = math.huge
+    local mousePos = Vector2.new(mouse.X, mouse.Y)
+    local parts = {"Head", "HumanoidRootPart", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "RightUpperLeg", "RightLowerLeg", "RightFoot", "LeftUpperArm", "LeftLowerArm", "LeftHand", "RightUpperArm", "RightLowerArm", "RightHand"}
+    for _, partName in pairs(parts) do
+        local p = char:FindFirstChild(partName)
+        if p then
+            local screenPos, onScreen = cam:WorldToScreenPoint(p.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                if dist < shortestDist then shortestDist = dist closest = p end
+            end
+        end
+    end
+    return closest or char:FindFirstChild("Head")
+end
+
+local function getTargetPart(char)
+    if not char then return nil end
+    if aimPart == "Body" then
+        return char:FindFirstChild("HumanoidRootPart")
+    elseif aimPart == "Left Leg" then
+        return char:FindFirstChild("LeftUpperLeg") or char:FindFirstChild("LeftLeg")
+    elseif aimPart == "Right Leg" then
+        return char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("RightLeg")
+    elseif aimPart == "Left Arm" then
+        return char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("LeftArm")
+    elseif aimPart == "Right Arm" then
+        return char:FindFirstChild("RightUpperArm") or char:FindFirstChild("RightArm")
+    else
+        return char:FindFirstChild("Head")
+    end
+end
+
+local function getClosest()
+    local mousePos = Vector2.new(mouse.X, mouse.Y)
+    local best = nil
+    local bestDist = _G.FOV_RADIUS
+    for i, v in pairs(plrs:GetPlayers()) do
+        local humanoid = v.Character and v.Character:FindFirstChild("Humanoid")
+        local canTarget = v ~= me and not isWhitelisted(v) and humanoid and humanoid.Health > 0
+
+        if canTarget and (not _G.KnockCheck or humanoid:GetState() ~= Enum.HumanoidStateType.Dead) then
+            local part = getTargetPart(v.Character)
+            if part then
+                local screenPos, onScreen = cam:WorldToScreenPoint(part.Position)
+                if onScreen then
+                    local screenVec = Vector2.new(screenPos.X, screenPos.Y)
+                    local dist = (screenVec - mousePos).Magnitude
+                    if dist < bestDist then
+                        if _G.WallCheck then
+                            local ray = Ray.new(cam.CFrame.Position, (part.Position - cam.CFrame.Position).Unit * 500)
+                            local hit, pos = workspace:FindPartOnRayWithIgnoreList(ray, {me.Character, cam})
+                            if hit and hit:IsDescendantOf(v.Character) then bestDist = dist best = part end
+                        else bestDist = dist best = part end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+handler.getAim = function(origin, maxDist)
+    if _G.RevolverBypass then
+        local currentTool = me.Character and me.Character:FindFirstChildOfClass("Tool")
+        if currentTool and (currentTool.Name == "[Revolver]" or currentTool.Name == "Revolver") then return oldFunc(origin, maxDist) end
+    end
+    local target = getClosest()
+    if target then
+        local dir = (target.Position - origin).Unit
+        local dist = (target.Position - origin).Magnitude
+        return dir, math.min(dist, maxDist or 200)
+    end
+    return oldFunc(origin, maxDist)
+end
+
+local UIS = game:GetService('UserInputService')
+local CoreGui = game:GetService('CoreGui')
+
+local gui = Instance.new('ScreenGui')
+gui.IgnoreGuiInset = true
+gui.ResetOnSpawn = false
+gui.Name = 'SilentAimUI'
+gui.Parent = CoreGui
+
+local frame = Instance.new('Frame')
+frame.Size = UDim2.new(0, 620, 0, 470)
+frame.Position = UDim2.new(0.5, -310, 0.5, -235)
+frame.BackgroundColor3 = Color3.fromRGB(20, 16, 30)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Parent = gui
+Instance.new('UICorner', frame).CornerRadius = UDim.new(0, 16)
+
+local dragBar = Instance.new('Frame')
+dragBar.Size = UDim2.new(1, -60, 0, 42)
+dragBar.Position = UDim2.new(0, 0, 0, 0)
+dragBar.BackgroundTransparency = 1
+dragBar.BorderSizePixel = 0
+dragBar.Active = true
+dragBar.ZIndex = 20
+dragBar.Parent = frame
+
+local dropScroll
+local dragging, dragInput, dragStart, startPos = false, nil, Vector2.new(), UDim2.new()
+
+local function beginDrag(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragInput = input
+        dragStart = input.Position
+        startPos = frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+                dragInput = nil
+            end
+        end)
+    end
+end
+
+local function stopDrag(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+        dragInput = nil
+    end
+end
+
+dragBar.InputBegan:Connect(beginDrag)
+dragBar.InputEnded:Connect(stopDrag)
+frame.InputBegan:Connect(beginDrag)
+frame.InputEnded:Connect(stopDrag)
+UIS.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local closeBtn = Instance.new('TextButton')
+closeBtn.Size = UDim2.new(0, 30, 0, 28)
+closeBtn.Position = UDim2.new(1, -40, 0, 8)
+closeBtn.AnchorPoint = Vector2.new(0, 0)
+closeBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+closeBtn.Text = 'X'
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 16
+closeBtn.TextColor3 = Color3.fromRGB(20, 16, 30)
+closeBtn.Parent = frame
+Instance.new('UICorner', closeBtn).CornerRadius = UDim.new(0, 6)
+
+local function hideGui()
+    frame.Visible = false
+    if dropScroll then
+        dropScroll.Visible = false
+    end
+end
+
+local function showGui()
+    frame.Visible = true
+end
+
+closeBtn.MouseButton1Click:Connect(hideGui)
+
+local sidebar = Instance.new('Frame')
+sidebar.Size = UDim2.new(0, 170, 1, 0)
+sidebar.BackgroundColor3 = Color3.fromRGB(28, 20, 44)
+sidebar.BorderSizePixel = 0
+sidebar.Parent = frame
+local sideCorner = Instance.new('UICorner', sidebar)
+sideCorner.CornerRadius = UDim.new(0, 16)
+
+local sideCover = Instance.new('Frame')
+sideCover.Size = UDim2.new(0, 20, 1, 0)
+sideCover.Position = UDim2.new(1, -20, 0, 0)
+sideCover.BackgroundColor3 = Color3.fromRGB(28, 20, 44)
+sideCover.BorderSizePixel = 0
+sideCover.Parent = sidebar
+
+local sideTitle = Instance.new('TextLabel')
+sideTitle.Size = UDim2.new(1, -20, 0, 40)
+sideTitle.Position = UDim2.new(0, 15, 0, 20)
+sideTitle.Text = 'Adis Custom ♡'
+sideTitle.TextColor3 = Color3.fromRGB(240, 235, 255)
+sideTitle.TextSize = 14
+sideTitle.Font = Enum.Font.Gotham
+sideTitle.BackgroundTransparency = 1
+sideTitle.TextXAlignment = Enum.TextXAlignment.Left
+sideTitle.Parent = sidebar
+local welcomeLabel = Instance.new('TextLabel')
+welcomeLabel.Size = UDim2.new(0, 395, 0, 40)
+welcomeLabel.Position = UDim2.new(0, 190, 0, 20)
+welcomeLabel.Text = 'Hello, ' .. me.Name
+welcomeLabel.TextColor3 = Color3.fromRGB(240, 235, 255)
+welcomeLabel.TextSize = 24
+welcomeLabel.Font = Enum.Font.Gotham
+welcomeLabel.BackgroundTransparency = 1
+welcomeLabel.TextXAlignment = Enum.TextXAlignment.Left
+welcomeLabel.Parent = frame
+
+local tabContainer = Instance.new('Frame')
+tabContainer.Size = UDim2.new(0, 415, 0, 360)
+tabContainer.Position = UDim2.new(0, 190, 0, 70)
+tabContainer.BackgroundTransparency = 1
+tabContainer.Parent = frame
+
+local tabs = {
+    CamLock = Instance.new('Frame'),
+    Home = Instance.new('Frame'),
+    SilentAim = Instance.new('Frame'),
+    Whitelist = Instance.new('Frame'),
+    ESP = Instance.new('Frame'),
+    Misc = Instance.new('Frame'),
+    Teleport = Instance.new('Frame'),
+    Avatar = Instance.new('Frame'),
+    Settings = Instance.new('Frame')
+}
+
+for name, page in pairs(tabs) do
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundColor3 = Color3.fromRGB(25, 18, 38)
+    page.BorderSizePixel = 0
+    page.Visible = (name == "SilentAim")
+    page.Parent = tabContainer
+    Instance.new('UICorner', page).CornerRadius = UDim.new(0, 12)
+end
+
+local tabButtons = {}
+local tabNames = {"Silent Aim", "CamLock", "Settings"}
+local tabKeys = {"SilentAim", "CamLock", "Settings"}
+
+local function switchTab(targetKey)
+    for key, page in pairs(tabs) do
+        page.Visible = (key == targetKey)
+    end
+    for key, btn in pairs(tabButtons) do
+        if key == targetKey then
+            btn.BackgroundColor3 = Color3.fromRGB(230, 210, 255)
+            btn.TextColor3 = Color3.fromRGB(120, 60, 210)
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(38, 33, 46)
+            btn.TextColor3 = Color3.fromRGB(245, 240, 250)
+        end
+    end
+end
+
+for idx, labelText in ipairs(tabNames) do
+    local key = tabKeys[idx]
+    local btn = Instance.new('TextButton')
+    btn.Size = UDim2.new(1, -20, 0, 35)
+    btn.Position = UDim2.new(0, 10, 0, 75 + (idx - 1) * 42)
+    btn.Text = '   ' .. labelText
+    btn.TextSize = 13
+    btn.Font = Enum.Font.Gotham
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = sidebar
+    Instance.new('UICorner', btn).CornerRadius = UDim.new(0, 8)
+    tabButtons[key] = btn
+    
+    btn.MouseButton1Click:Connect(function()
+        switchTab(key)
+    end)
+end
+switchTab("SilentAim")
+
+local function createPageHeader(pageFrame, titleText)
+    local title = Instance.new('TextLabel')
+    title.Size = UDim2.new(1, -30, 0, 30)
+    title.Position = UDim2.new(0, 15, 0, 10)
+    title.Text = titleText
+    title.TextColor3 = Color3.fromRGB(180, 140, 255)
+    title.TextSize = 15
+    title.Font = Enum.Font.GothamBold
+    title.BackgroundTransparency = 1
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = pageFrame
+
+    local line = Instance.new('Frame')
+    line.Size = UDim2.new(1, -30, 0, 1)
+    line.Position = UDim2.new(0, 15, 0, 40)
+    line.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+    line.BorderSizePixel = 0
+    line.Parent = pageFrame
+end
+
+createPageHeader(tabs.SilentAim, "Silent Aim Settings")
+createPageHeader(tabs.CamLock, "CamLock Settings")
+createPageHeader(tabs.Settings, "Settings")
+
+local homeTitle = Instance.new('TextLabel')
+homeTitle.Size = UDim2.new(1, -30, 0, 24)
+homeTitle.Position = UDim2.new(0, 15, 0, 55)
+homeTitle.Text = 'Executed by'
+homeTitle.TextColor3 = Color3.fromRGB(180, 140, 255)
+homeTitle.TextSize = 16
+homeTitle.Font = Enum.Font.GothamBold
+homeTitle.BackgroundTransparency = 1
+homeTitle.TextXAlignment = Enum.TextXAlignment.Left
+homeTitle.Parent = tabs.Home
+
+local avatarFrame = Instance.new('Frame')
+avatarFrame.Size = UDim2.new(0, 120, 0, 120)
+avatarFrame.Position = UDim2.new(0, 15, 0, 95)
+avatarFrame.BackgroundColor3 = Color3.fromRGB(38, 33, 46)
+avatarFrame.BorderSizePixel = 0
+avatarFrame.Parent = tabs.Home
+Instance.new('UICorner', avatarFrame).CornerRadius = UDim.new(0, 16)
+
+local avatarImage = Instance.new('ImageLabel')
+avatarImage.Size = UDim2.new(1, 0, 1, 0)
+avatarImage.Position = UDim2.new(0, 0, 0, 0)
+avatarImage.BackgroundTransparency = 1
+avatarImage.Image = ''
+avatarImage.ScaleType = Enum.ScaleType.Crop
+avatarImage.Parent = avatarFrame
+
+local displayLabel = Instance.new('TextLabel')
+displayLabel.Size = UDim2.new(1, -150, 0, 22)
+displayLabel.Position = UDim2.new(0, 150, 0, 95)
+displayLabel.Text = 'Display Name: ' .. me.DisplayName
+displayLabel.TextColor3 = Color3.fromRGB(230, 220, 255)
+displayLabel.TextSize = 13
+displayLabel.Font = Enum.Font.Gotham
+
+displayLabel.BackgroundTransparency = 1
+displayLabel.TextXAlignment = Enum.TextXAlignment.Left
+displayLabel.Parent = tabs.Home
+
+local usernameLabel = Instance.new('TextLabel')
+usernameLabel.Size = UDim2.new(1, -150, 0, 22)
+usernameLabel.Position = UDim2.new(0, 150, 0, 125)
+usernameLabel.Text = 'Username: ' .. me.Name
+usernameLabel.TextColor3 = Color3.fromRGB(230, 220, 255)
+usernameLabel.TextSize = 13
+usernameLabel.Font = Enum.Font.Gotham
+usernameLabel.BackgroundTransparency = 1
+usernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+usernameLabel.Parent = tabs.Home
+
+local idLabel = Instance.new('TextLabel')
+idLabel.Size = UDim2.new(1, -150, 0, 22)
+idLabel.Position = UDim2.new(0, 150, 0, 155)
+idLabel.Text = 'User ID: ' .. tostring(me.UserId)
+idLabel.TextColor3 = Color3.fromRGB(230, 220, 255)
+idLabel.TextSize = 13
+idLabel.Font = Enum.Font.Gotham
+idLabel.BackgroundTransparency = 1
+idLabel.TextXAlignment = Enum.TextXAlignment.Left
+idLabel.Parent = tabs.Home
+
+spawn(function()
+    local success, thumb = pcall(function()
+        return game:GetService('Players'):GetUserThumbnailAsync(me.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size150x150)
+    end)
+    if success and thumb then
+        avatarImage.Image = thumb
+    end
+end)
+
+local toggleLabel = Instance.new('TextLabel')
+toggleLabel.Size = UDim2.new(0, 150, 0, 30)
+toggleLabel.Position = UDim2.new(0, 15, 0, 55)
+toggleLabel.Text = 'Revolver Bypass'
+toggleLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+toggleLabel.TextSize = 13
+toggleLabel.Font = Enum.Font.Gotham
+toggleLabel.BackgroundTransparency = 1
+toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+toggleLabel.Parent = tabs.SilentAim
+
+local toggleBtn = Instance.new('TextButton')
+toggleBtn.Size = UDim2.new(0, 50, 0, 22)
+toggleBtn.Position = UDim2.new(1, -65, 0, 59)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+toggleBtn.Text = 'OFF'
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 11
+toggleBtn.Parent = tabs.SilentAim
+Instance.new('UICorner', toggleBtn).CornerRadius = UDim.new(0, 6)
+
+toggleBtn.MouseButton1Click:Connect(function()
+    _G.RevolverBypass = not _G.RevolverBypass
+    if _G.RevolverBypass then
+        toggleBtn.Text = 'ON'
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+    else
+        toggleBtn.Text = 'OFF'
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+    end
+end)
+
+local wallLabel = Instance.new('TextLabel')
+wallLabel.Size = UDim2.new(0, 150, 0, 30)
+wallLabel.Position = UDim2.new(0, 15, 0, 95)
+wallLabel.Text = 'Wall Check'
+wallLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+wallLabel.TextSize = 13
+wallLabel.Font = Enum.Font.Gotham
+wallLabel.BackgroundTransparency = 1
+wallLabel.TextXAlignment = Enum.TextXAlignment.Left
+wallLabel.Parent = tabs.SilentAim
+
+local wallBtn = Instance.new('TextButton')
+wallBtn.Size = UDim2.new(0, 50, 0, 22)
+wallBtn.Position = UDim2.new(1, -65, 0, 99)
+wallBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+wallBtn.Text = 'OFF'
+wallBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+wallBtn.Font = Enum.Font.GothamBold
+wallBtn.TextSize = 11
+wallBtn.Parent = tabs.SilentAim
+Instance.new('UICorner', wallBtn).CornerRadius = UDim.new(0, 6)
+
+wallBtn.MouseButton1Click:Connect(function()
+    _G.WallCheck = not _G.WallCheck
+    if _G.WallCheck then
+        wallBtn.Text = 'ON'
+        wallBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+    else
+        wallBtn.Text = 'OFF'
+        wallBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+    end
+end)
+
+local knockLabel = Instance.new('TextLabel')
+knockLabel.Size = UDim2.new(0, 150, 0, 30)
+knockLabel.Position = UDim2.new(0, 15, 0, 135)
+knockLabel.Text = 'Knock Check'
+knockLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+knockLabel.TextSize = 13
+knockLabel.Font = Enum.Font.Gotham
+knockLabel.BackgroundTransparency = 1
+knockLabel.TextXAlignment = Enum.TextXAlignment.Left
+knockLabel.Parent = tabs.SilentAim
+
+local knockBtn = Instance.new('TextButton')
+knockBtn.Size = UDim2.new(0, 50, 0, 22)
+knockBtn.Position = UDim2.new(1, -65, 0, 139)
+knockBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+knockBtn.Text = 'OFF'
+knockBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+knockBtn.Font = Enum.Font.GothamBold
+knockBtn.TextSize = 11
+knockBtn.Parent = tabs.SilentAim
+Instance.new('UICorner', knockBtn).CornerRadius = UDim.new(0, 6)
+
+knockBtn.MouseButton1Click:Connect(function()
+    _G.KnockCheck = not _G.KnockCheck
+    if _G.KnockCheck then
+        knockBtn.Text = 'ON'
+        knockBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+    else
+        knockBtn.Text = 'OFF'
+        knockBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+    end
+end)
+
+local fovMax = 1000
+local fovTitleLabel = Instance.new('TextLabel')
+fovTitleLabel.Size = UDim2.new(1, -100, 0, 20)
+fovTitleLabel.Position = UDim2.new(0, 15, 0, 175)
+fovTitleLabel.Text = 'FOV Radius'
+fovTitleLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+fovTitleLabel.TextSize = 13
+fovTitleLabel.Font = Enum.Font.Gotham
+fovTitleLabel.BackgroundTransparency = 1
+fovTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+fovTitleLabel.Parent = tabs.SilentAim
+
+local slider = Instance.new('Frame')
+slider.Size = UDim2.new(1, -30, 0, 6)
+slider.Position = UDim2.new(0, 15, 0, 205)
+slider.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+slider.BorderSizePixel = 0
+slider.Parent = tabs.SilentAim
+Instance.new('UICorner', slider).CornerRadius = UDim.new(1, 0)
+
+local button = Instance.new('TextButton')
+button.Size = UDim2.new(0, 14, 0, 14)
+button.Position = UDim2.new(0, -7, 0.5, -7)
+button.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+button.BorderSizePixel = 0
+button.Text = ""
+button.Parent = slider
+Instance.new('UICorner', button).CornerRadius = UDim.new(1, 0)
+
+local fovInput = Instance.new('TextBox')
+fovInput.Size = UDim2.new(0, 60, 0, 22)
+fovInput.Position = UDim2.new(1, -75, 0, 175)
+fovInput.Text = '0'
+fovInput.PlaceholderText = '0'
+fovInput.TextColor3 = Color3.fromRGB(95, 38, 145)
+fovInput.TextSize = 12
+fovInput.Font = Enum.Font.Gotham
+fovInput.BackgroundColor3 = Color3.fromRGB(230, 220, 255)
+fovInput.BorderSizePixel = 0
+fovInput.BackgroundTransparency = 0
+fovInput.ClearTextOnFocus = false
+fovInput.TextXAlignment = Enum.TextXAlignment.Center
+fovInput.Parent = tabs.SilentAim
+Instance.new('UICorner', fovInput).CornerRadius = UDim.new(0, 6)
+
+local spreadTitleLabel = Instance.new('TextLabel')
+spreadTitleLabel.Size = UDim2.new(1, -100, 0, 20)
+spreadTitleLabel.Position = UDim2.new(0, 15, 0, 245)
+spreadTitleLabel.Text = 'Bullet Spread'
+spreadTitleLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+spreadTitleLabel.TextSize = 13
+spreadTitleLabel.Font = Enum.Font.Gotham
+spreadTitleLabel.BackgroundTransparency = 1
+spreadTitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+spreadTitleLabel.Parent = tabs.SilentAim
+
+local spreadSlider = Instance.new('Frame')
+spreadSlider.Size = UDim2.new(1, -30, 0, 6)
+spreadSlider.Position = UDim2.new(0, 15, 0, 275)
+spreadSlider.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+spreadSlider.BorderSizePixel = 0
+spreadSlider.Parent = tabs.SilentAim
+Instance.new('UICorner', spreadSlider).CornerRadius = UDim.new(1, 0)
+
+local spreadBtn = Instance.new('TextButton')
+spreadBtn.Size = UDim2.new(0, 14, 0, 14)
+spreadBtn.Position = UDim2.new(0, -7, 0.5, -7)
+spreadBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+spreadBtn.BorderSizePixel = 0
+spreadBtn.Text = ""
+spreadBtn.Parent = spreadSlider
+Instance.new('UICorner', spreadBtn).CornerRadius = UDim.new(1, 0)
+
+local spreadInput = Instance.new('TextBox')
+spreadInput.Size = UDim2.new(0, 60, 0, 22)
+spreadInput.Position = UDim2.new(1, -75, 0, 245)
+spreadInput.Text = tostring(_0x52a0d5.BulletSpread.Amount)
+spreadInput.PlaceholderText = tostring(_0x52a0d5.BulletSpread.Amount)
+spreadInput.TextColor3 = Color3.fromRGB(95, 38, 145)
+spreadInput.TextSize = 12
+spreadInput.Font = Enum.Font.Gotham
+spreadInput.BackgroundColor3 = Color3.fromRGB(230, 220, 255)
+spreadInput.BorderSizePixel = 0
+spreadInput.BackgroundTransparency = 0
+spreadInput.ClearTextOnFocus = false
+spreadInput.TextXAlignment = Enum.TextXAlignment.Center
+spreadInput.Parent = tabs.SilentAim
+Instance.new('UICorner', spreadInput).CornerRadius = UDim.new(0, 6)
+
+local function syncSpreadUI(value)
+    local clampedValue = math.clamp(math.floor(value or 0), 0, 100)
+    _0x52a0d5.BulletSpread.Amount = clampedValue
+    spreadInput.Text = tostring(clampedValue)
+    local percent = clampedValue / 100
+    spreadBtn.Position = UDim2.new(percent, -7, 0.5, -7)
+end
+
+syncSpreadUI(_0x52a0d5.BulletSpread.Amount)
+
+local hitLabel = Instance.new('TextLabel')
+hitLabel.Size = UDim2.new(0, 100, 0, 30)
+hitLabel.Position = UDim2.new(0, 15, 0, 300)
+hitLabel.Text = 'Aim Part'
+hitLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+hitLabel.TextSize = 13
+hitLabel.Font = Enum.Font.Gotham
+hitLabel.BackgroundTransparency = 1
+hitLabel.TextXAlignment = Enum.TextXAlignment.Left
+hitLabel.Parent = tabs.SilentAim
+
+local dropMain = Instance.new('TextButton')
+dropMain.Size = UDim2.new(0, 170, 0, 24)
+dropMain.Position = UDim2.new(0, 15, 0, 302)
+dropMain.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+dropMain.Text = 'Head v'
+dropMain.TextColor3 = Color3.fromRGB(180, 140, 255)
+dropMain.Font = Enum.Font.GothamBold
+dropMain.TextSize = 12
+dropMain.ZIndex = 50
+dropMain.Parent = tabs.SilentAim
+Instance.new('UICorner', dropMain).CornerRadius = UDim.new(0, 6)
+
+local dropScroll = Instance.new('ScrollingFrame')
+dropScroll.Size = UDim2.new(0, 170, 0, 100)
+dropScroll.Position = UDim2.new(0, 15, 0, 332)
+dropScroll.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+dropScroll.BorderSizePixel = 0
+dropScroll.Visible = false
+dropScroll.ZIndex = 51
+dropScroll.CanvasSize = UDim2.new(0, 0, 0, 215)
+dropScroll.ScrollBarThickness = 6
+dropScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+dropScroll.Parent = tabs.SilentAim
+Instance.new('UICorner', dropScroll).CornerRadius = UDim.new(0, 6)
+
+local dropListLayout = Instance.new('UIListLayout')
+dropListLayout.Padding = UDim.new(0, 4)
+dropListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+dropListLayout.Parent = dropScroll
+
+local function updateDropScrollLayout()
+    local desiredHeight = math.min(#partsList * 30 + 8, 160)
+    local containerPos = tabContainer.AbsolutePosition
+    local containerSize = tabContainer.AbsoluteSize
+    local dmPos = dropMain.AbsolutePosition
+    local dmSize = dropMain.AbsoluteSize
+    local belowSpace = (containerPos.Y + containerSize.Y) - (dmPos.Y + dmSize.Y) - 10
+    local aboveSpace = dmPos.Y - containerPos.Y - 10
+
+    desiredHeight = math.min(desiredHeight, containerSize.Y - 20)
+    local menuWidth = math.min(170, containerSize.X - 30)
+    local relativeX = dmPos.X - containerPos.X
+    local x = math.clamp(relativeX, 10, math.max(10, containerSize.X - menuWidth - 10))
+
+    if belowSpace >= 40 then
+        local h = math.min(desiredHeight, math.max(40, belowSpace))
+        dropScroll.AnchorPoint = Vector2.new(0, 0)
+        dropScroll.Size = UDim2.new(0, menuWidth, 0, h)
+        local y = dmPos.Y - containerPos.Y + dmSize.Y + 6
+        dropScroll.Position = UDim2.new(0, x, 0, y)
+    else
+        local h = math.min(desiredHeight, math.max(40, aboveSpace))
+        dropScroll.AnchorPoint = Vector2.new(0, 1)
+        dropScroll.Size = UDim2.new(0, menuWidth, 0, h)
+        local y = dmPos.Y - containerPos.Y - 6
+        dropScroll.Position = UDim2.new(0, x, 0, y)
+    end
+
+    dropScroll.CanvasSize = UDim2.new(0, 0, 0, (#partsList * 30) + 8)
+end
+
+local partsList = {"Head", "Body", "Left Leg", "Right Leg", "Left Arm", "Right Arm"}
+for idx, partName in ipairs(partsList) do
+    local partBtn = Instance.new('TextButton')
+    partBtn.Size = UDim2.new(1, -12, 0, 28)
+    partBtn.LayoutOrder = idx
+    partBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+    partBtn.Text = partName
+    partBtn.TextColor3 = Color3.fromRGB(180, 140, 255)
+    partBtn.Font = Enum.Font.Gotham
+    partBtn.TextSize = 12
+    partBtn.ZIndex = 52
+    partBtn.Parent = dropScroll
+    Instance.new('UICorner', partBtn).CornerRadius = UDim.new(0, 4)
+
+    partBtn.MouseButton1Click:Connect(function()
+        aimPart = partName
+        dropMain.Text = partName .. ' v'
+        dropScroll.Visible = false
+    end)
+end
+
+dropMain.MouseButton1Click:Connect(function()
+    local ok, err = pcall(updateDropScrollLayout)
+    if not ok then
+        warn('updateDropScrollLayout error:', err)
+    end
+    dropScroll.Visible = not dropScroll.Visible
+end)
+-- CamLock Tab UI
+local camLabel = Instance.new('TextLabel')
+camLabel.Size = UDim2.new(0, 150, 0, 30)
+camLabel.Position = UDim2.new(0, 15, 0, 55)
+camLabel.Text = 'CamLock'
+camLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+camLabel.TextSize = 13
+camLabel.Font = Enum.Font.Gotham
+camLabel.BackgroundTransparency = 1
+camLabel.TextXAlignment = Enum.TextXAlignment.Left
+camLabel.Parent = tabs.CamLock
+
+local camLockToggleBtn = Instance.new('TextButton')
+camLockToggleBtn.Size = UDim2.new(0, 50, 0, 22)
+camLockToggleBtn.Position = UDim2.new(1, -65, 0, 59)
+camLockToggleBtn.BackgroundColor3 = _G.CamLock_Enabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+camLockToggleBtn.Text = _G.CamLock_Enabled and 'ON' or 'OFF'
+camLockToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+camLockToggleBtn.Font = Enum.Font.GothamBold
+camLockToggleBtn.TextSize = 11
+camLockToggleBtn.Parent = tabs.CamLock
+Instance.new('UICorner', camLockToggleBtn).CornerRadius = UDim.new(0, 6)
+
+local lastLockedPlayer = nil
+local lastCamLockDir = nil
+local currentCamLockTargetPart = nil
+
+local function getLockPart(character)
+    return getTargetPart(character) or character:FindFirstChild('Head')
+end
+
+local function getCamLockTargetForCursor()
+    local mousePos = Vector2.new(mouse.X, mouse.Y)
+    local bestPlayer, bestPart = nil, nil
+    local bestDist = math.huge
+
+    for _, p in pairs(plrs:GetPlayers()) do
+        if p ~= me and not isWhitelisted(p) then
+            local character = p.Character
+            local humanoid = character and character:FindFirstChild('Humanoid')
+            if character and humanoid and humanoid.Health > 0 then
+                local part = getLockPart(character)
+                if part and part:IsA('BasePart') then
+                    local screenPos, onScreen = cam:WorldToScreenPoint(part.Position)
+                    if onScreen then
+                        local screenVec = Vector2.new(screenPos.X, screenPos.Y)
+                        local dist = (screenVec - mousePos).Magnitude
+                        if dist < bestDist then
+                            bestDist = dist
+                            bestPlayer = p
+                            bestPart = part
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return bestPlayer, bestPart
+end
+
+local function updateCamLockState(enabled)
+    _G.CamLock_Enabled = enabled
+    camLockToggleBtn.Text = _G.CamLock_Enabled and 'ON' or 'OFF'
+    camLockToggleBtn.BackgroundColor3 = _G.CamLock_Enabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+    if _G.CamLock_Enabled then
+        local targetPlayer, targetPart = getCamLockTargetForCursor()
+        lastLockedPlayer = targetPlayer
+        currentCamLockTargetPart = targetPart
+        if targetPlayer and targetPart and me.Character and me.Character:FindFirstChild('HumanoidRootPart') then
+            local rootPos = me.Character.HumanoidRootPart.Position
+            local direction = targetPart.Position - rootPos
+            lastCamLockDir = direction.Magnitude > 0 and direction.Unit or cam.CFrame.LookVector
+            lockedLabel.Text = 'Locked: ' .. (targetPlayer.DisplayName or targetPlayer.Name)
+        else
+            lastCamLockDir = nil
+            lockedLabel.Text = 'Locked: None'
+        end
+    else
+        lastLockedPlayer = nil
+        currentCamLockTargetPart = nil
+        lastCamLockDir = nil
+        lockedLabel.Text = 'Locked: None'
+    end
+end
+
+camLockToggleBtn.MouseButton1Click:Connect(function()
+    updateCamLockState(not _G.CamLock_Enabled)
+end)
+
+local camSmoothLabel = Instance.new('TextLabel')
+camSmoothLabel.Size = UDim2.new(1, -100, 0, 20)
+camSmoothLabel.Position = UDim2.new(0, 15, 0, 95)
+camSmoothLabel.Text = 'Smoothness (0.1 smooth - 1 snappy)'
+camSmoothLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+camSmoothLabel.TextSize = 13
+camSmoothLabel.Font = Enum.Font.Gotham
+camSmoothLabel.BackgroundTransparency = 1
+camSmoothLabel.TextXAlignment = Enum.TextXAlignment.Left
+camSmoothLabel.Parent = tabs.CamLock
+
+local camSmoothSlider = Instance.new('Frame')
+camSmoothSlider.Size = UDim2.new(1, -30, 0, 6)
+camSmoothSlider.Position = UDim2.new(0, 15, 0, 125)
+camSmoothSlider.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+camSmoothSlider.BorderSizePixel = 0
+camSmoothSlider.Parent = tabs.CamLock
+Instance.new('UICorner', camSmoothSlider).CornerRadius = UDim.new(1, 0)
+
+local camSmoothBtn = Instance.new('TextButton')
+camSmoothBtn.Size = UDim2.new(0, 14, 0, 14)
+camSmoothBtn.Position = UDim2.new(0, 0, 0.5, -7)
+camSmoothBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+camSmoothBtn.BorderSizePixel = 0
+camSmoothBtn.Text = ""
+camSmoothBtn.Parent = camSmoothSlider
+Instance.new('UICorner', camSmoothBtn).CornerRadius = UDim.new(1, 0)
+
+local camSmoothInput = Instance.new('TextBox')
+camSmoothInput.Size = UDim2.new(0, 60, 0, 22)
+camSmoothInput.Position = UDim2.new(1, -75, 0, 95)
+camSmoothInput.Text = tostring(_G.CamLock_Smoothness)
+camSmoothInput.PlaceholderText = tostring(_G.CamLock_Smoothness)
+camSmoothInput.TextColor3 = Color3.fromRGB(95, 38, 145)
+camSmoothInput.TextSize = 12
+camSmoothInput.Font = Enum.Font.Gotham
+camSmoothInput.BackgroundColor3 = Color3.fromRGB(230, 220, 255)
+camSmoothInput.BorderSizePixel = 0
+camSmoothInput.BackgroundTransparency = 0
+camSmoothInput.ClearTextOnFocus = false
+camSmoothInput.TextXAlignment = Enum.TextXAlignment.Center
+camSmoothInput.Parent = tabs.CamLock
+Instance.new('UICorner', camSmoothInput).CornerRadius = UDim.new(0, 6)
+
+local sliderCover = Instance.new('TextButton')
+sliderCover.Size = UDim2.new(1, -30, 0, 6)
+sliderCover.Position = camSmoothSlider.Position
+sliderCover.BackgroundTransparency = 1
+sliderCover.AutoButtonColor = false
+sliderCover.Text = ""
+sliderCover.TextTransparency = 1
+sliderCover.Parent = tabs.CamLock
+
+local bodyPartLabel = Instance.new('TextLabel')
+bodyPartLabel.Size = UDim2.new(0, 150, 0, 30)
+bodyPartLabel.Position = UDim2.new(0, 15, 0, 200)
+bodyPartLabel.Text = 'Lock Body Part'
+bodyPartLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+bodyPartLabel.TextSize = 13
+bodyPartLabel.Font = Enum.Font.Gotham
+bodyPartLabel.BackgroundTransparency = 1
+bodyPartLabel.TextXAlignment = Enum.TextXAlignment.Left
+bodyPartLabel.Parent = tabs.CamLock
+
+local bodyPartMain = Instance.new('TextButton')
+bodyPartMain.Size = UDim2.new(0, 170, 0, 24)
+bodyPartMain.Position = UDim2.new(0, 15, 0, 235)
+bodyPartMain.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+bodyPartMain.Text = aimPart .. ' v'
+bodyPartMain.TextColor3 = Color3.fromRGB(180, 140, 255)
+bodyPartMain.Font = Enum.Font.GothamBold
+bodyPartMain.TextSize = 12
+bodyPartMain.ZIndex = 50
+bodyPartMain.Parent = tabs.CamLock
+Instance.new('UICorner', bodyPartMain).CornerRadius = UDim.new(0, 6)
+
+local bodyPartScroll = Instance.new('ScrollingFrame')
+bodyPartScroll.Size = UDim2.new(0, 170, 0, 120)
+bodyPartScroll.Position = UDim2.new(0, 15, 0, 265)
+bodyPartScroll.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+bodyPartScroll.BorderSizePixel = 0
+bodyPartScroll.Visible = false
+bodyPartScroll.ZIndex = 51
+bodyPartScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+bodyPartScroll.ScrollBarThickness = 6
+bodyPartScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+bodyPartScroll.Parent = tabs.CamLock
+Instance.new('UICorner', bodyPartScroll).CornerRadius = UDim.new(0, 6)
+
+local bodyPartListLayout = Instance.new('UIListLayout')
+bodyPartListLayout.Padding = UDim.new(0, 4)
+bodyPartListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+bodyPartListLayout.Parent = bodyPartScroll
+
+local bodyParts = {'Head', 'Body', 'Left Leg', 'Right Leg', 'Left Arm', 'Right Arm'}
+for idx, partName in ipairs(bodyParts) do
+    local partBtn = Instance.new('TextButton')
+    partBtn.Size = UDim2.new(1, -12, 0, 28)
+    partBtn.LayoutOrder = idx
+    partBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+    partBtn.Text = partName
+    partBtn.TextColor3 = Color3.fromRGB(180, 140, 255)
+    partBtn.Font = Enum.Font.Gotham
+    partBtn.TextSize = 12
+    partBtn.ZIndex = 52
+    partBtn.Parent = bodyPartScroll
+    Instance.new('UICorner', partBtn).CornerRadius = UDim.new(0, 4)
+
+    partBtn.MouseButton1Click:Connect(function()
+        aimPart = partName
+        bodyPartMain.Text = partName .. ' v'
+        bodyPartScroll.Visible = false
+        if _G.CamLock_Enabled then
+            updateCamLockState(true)
+        end
+    end)
+end
+
+bodyPartScroll.CanvasSize = UDim2.new(0, 0, 0, (#bodyParts * 30) + 8)
+
+bodyPartMain.MouseButton1Click:Connect(function()
+    bodyPartScroll.Visible = not bodyPartScroll.Visible
+end)
+
+local function syncCamLockUI(value)
+    local v = tonumber(value) or _G.CamLock_Smoothness
+    v = math.clamp(v, 0.1, 1)
+    _G.CamLock_Smoothness = v
+    camSmoothInput.Text = string.format("%.2f", v)
+    local percent = (v - 0.1) / 0.9
+    camSmoothBtn.Position = UDim2.new(percent, -7, 0.5, -7)
+end
+
+syncCamLockUI(_G.CamLock_Smoothness)
+
+camSmoothInput.FocusLost:Connect(function(enter)
+    if enter then
+        syncCamLockUI(tonumber(camSmoothInput.Text) or _G.CamLock_Smoothness)
+    end
+end)
+
+sliderCover.MouseButton1Down:Connect(function()
+    local camSmoothDragging = true
+    local camSmoothConn
+    local function updatePos(xPos)
+        local absPos = camSmoothSlider.AbsolutePosition
+        local absSize = camSmoothSlider.AbsoluteSize
+        local x = math.clamp(xPos - absPos.X, 0, absSize.X)
+        local pct = x / absSize.X
+        local v = 0.1 + pct * 0.9
+        syncCamLockUI(v)
+    end
+    updatePos(mouse.X)
+    camSmoothConn = UIS.InputChanged:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseMovement then
+            updatePos(inp.Position.X)
+        end
+    end)
+    local endedConn
+    endedConn = UIS.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            if camSmoothConn then camSmoothConn:Disconnect() end
+            endedConn:Disconnect()
+        end
+    end)
+end)
+
+local camBindLabel = Instance.new('TextLabel')
+camBindLabel.Size = UDim2.new(0, 150, 0, 30)
+camBindLabel.Position = UDim2.new(0, 15, 0, 155)
+camBindLabel.Text = 'CamLock Bind'
+camBindLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+camBindLabel.TextSize = 13
+camBindLabel.Font = Enum.Font.Gotham
+camBindLabel.BackgroundTransparency = 1
+camBindLabel.TextXAlignment = Enum.TextXAlignment.Left
+camBindLabel.Parent = tabs.CamLock
+
+local camLockBindBtn = Instance.new('TextButton')
+camLockBindBtn.Size = UDim2.new(0, 70, 0, 22)
+camLockBindBtn.Position = UDim2.new(1, -85, 0, 159)
+camLockBindBtn.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+camLockBindBtn.Text = 'Key: ' .. (_G.CamLock_Key and _G.CamLock_Key.Name or 'V')
+camLockBindBtn.TextColor3 = Color3.fromRGB(120, 60, 210)
+camLockBindBtn.Font = Enum.Font.GothamBold
+camLockBindBtn.TextSize = 11
+camLockBindBtn.Parent = tabs.CamLock
+Instance.new('UICorner', camLockBindBtn).CornerRadius = UDim.new(0, 6)
+
+camLockBindBtn.MouseButton1Click:Connect(function()
+    isCamLockBinding = true
+    camLockBindBtn.Text = '...'
+end)
+
+-- show which player is currently locked
+local lockedLabel = Instance.new('TextLabel')
+lockedLabel.Size = UDim2.new(1, -30, 0, 20)
+lockedLabel.Position = UDim2.new(0, 15, 0, 190)
+lockedLabel.Text = 'Locked: None'
+lockedLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+lockedLabel.TextSize = 12
+lockedLabel.Font = Enum.Font.Gotham
+lockedLabel.BackgroundTransparency = 1
+lockedLabel.TextXAlignment = Enum.TextXAlignment.Left
+lockedLabel.Parent = tabs.CamLock
+
+-- allow binding and toggling by key
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if isCamLockBinding and input.UserInputType == Enum.UserInputType.Keyboard then
+        _G.CamLock_Key = input.KeyCode
+        camLockBindBtn.Text = 'Key: ' .. input.KeyCode.Name
+        isCamLockBinding = false
+        return
+    end
+    if input.KeyCode == _G.CamLock_Key and not isCamLockBinding then
+        updateCamLockState(not _G.CamLock_Enabled)
+    end
+end)
+local espBoxLabel = Instance.new('TextLabel')
+espBoxLabel.Size = UDim2.new(0, 150, 0, 30)
+espBoxLabel.Position = UDim2.new(0, 15, 0, 95)
+espBoxLabel.Text = 'ESP Boxes'
+espBoxLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+espBoxLabel.TextSize = 13
+espBoxLabel.Font = Enum.Font.Gotham
+espBoxLabel.BackgroundTransparency = 1
+espBoxLabel.TextXAlignment = Enum.TextXAlignment.Left
+espBoxLabel.Parent = tabs.ESP
+
+local espBoxBtn = Instance.new('TextButton')
+espBoxBtn.Size = UDim2.new(0, 50, 0, 22)
+espBoxBtn.Position = UDim2.new(1, -65, 0, 99)
+espBoxBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+espBoxBtn.Text = 'OFF'
+espBoxBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+espBoxBtn.Font = Enum.Font.GothamBold
+espBoxBtn.TextSize = 11
+espBoxBtn.Parent = tabs.ESP
+Instance.new('UICorner', espBoxBtn).CornerRadius = UDim.new(0, 6)
+
+espBoxBtn.MouseButton1Click:Connect(function()
+    _G.ESP_Boxes = not _G.ESP_Boxes
+    espBoxBtn.Text = _G.ESP_Boxes and 'ON' or 'OFF'
+    espBoxBtn.BackgroundColor3 = _G.ESP_Boxes and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+end)
+
+local espNameLabel = Instance.new('TextLabel')
+espNameLabel.Size = UDim2.new(0, 150, 0, 30)
+espNameLabel.Position = UDim2.new(0, 15, 0, 55)
+espNameLabel.Text = 'ESP Names'
+espNameLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+espNameLabel.TextSize = 13
+espNameLabel.Font = Enum.Font.Gotham
+espNameLabel.BackgroundTransparency = 1
+espNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+espNameLabel.Parent = tabs.ESP
+
+local espNameBtn = Instance.new('TextButton')
+espNameBtn.Size = UDim2.new(0, 50, 0, 22)
+espNameBtn.Position = UDim2.new(1, -65, 0, 59)
+espNameBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+espNameBtn.Text = 'OFF'
+espNameBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+espNameBtn.Font = Enum.Font.GothamBold
+espNameBtn.TextSize = 11
+espNameBtn.Parent = tabs.ESP
+Instance.new('UICorner', espNameBtn).CornerRadius = UDim.new(0, 6)
+
+espNameBtn.MouseButton1Click:Connect(function()
+    _G.ESP_Names = not _G.ESP_Names
+    espNameBtn.Text = _G.ESP_Names and 'ON' or 'OFF'
+    espNameBtn.BackgroundColor3 = _G.ESP_Names and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+end)
+
+local espHealthLabel = Instance.new('TextLabel')
+espHealthLabel.Size = UDim2.new(0, 150, 0, 30)
+espHealthLabel.Position = UDim2.new(0, 15, 0, 135)
+espHealthLabel.Text = 'ESP Health'
+espHealthLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+espHealthLabel.TextSize = 13
+espHealthLabel.Font = Enum.Font.Gotham
+espHealthLabel.BackgroundTransparency = 1
+espHealthLabel.TextXAlignment = Enum.TextXAlignment.Left
+espHealthLabel.Parent = tabs.ESP
+
+local espHealthBtn = Instance.new('TextButton')
+espHealthBtn.Size = UDim2.new(0, 50, 0, 22)
+espHealthBtn.Position = UDim2.new(1, -65, 0, 139)
+espHealthBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+espHealthBtn.Text = 'OFF'
+espHealthBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+espHealthBtn.Font = Enum.Font.GothamBold
+espHealthBtn.TextSize = 11
+espHealthBtn.Parent = tabs.ESP
+Instance.new('UICorner', espHealthBtn).CornerRadius = UDim.new(0, 6)
+
+espHealthBtn.MouseButton1Click:Connect(function()
+    _G.ESP_Health = not _G.ESP_Health
+    espHealthBtn.Text = _G.ESP_Health and 'ON' or 'OFF'
+    espHealthBtn.BackgroundColor3 = _G.ESP_Health and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+end)
+
+local paletteLabel = Instance.new('TextLabel')
+paletteLabel.Size = UDim2.new(1, -30, 0, 20)
+paletteLabel.Position = UDim2.new(0, 15, 0, 175)
+paletteLabel.Text = 'Select ESP Color'
+paletteLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+paletteLabel.TextSize = 13
+paletteLabel.Font = Enum.Font.Gotham
+paletteLabel.BackgroundTransparency = 1
+paletteLabel.TextXAlignment = Enum.TextXAlignment.Left
+paletteLabel.Parent = tabs.ESP
+
+local colorColors = {
+    Color3.fromRGB(255, 50, 50), Color3.fromRGB(255, 130, 30), Color3.fromRGB(255, 215, 0),
+    Color3.fromRGB(50, 220, 50), Color3.fromRGB(50, 150, 255), Color3.fromRGB(30, 30, 150),
+    Color3.fromRGB(160, 50, 215), Color3.fromRGB(20, 20, 20), Color3.fromRGB(255, 255, 255)
+}
+
+for idx, colorHex in ipairs(colorColors) do
+    local cBtn = Instance.new('TextButton')
+    cBtn.Size = UDim2.new(0, 26, 0, 26)
+    cBtn.Position = UDim2.new(0, 15 + ((idx-1) % 5) * 34, 0, 195 + math.floor((idx-1) / 5) * 34)
+    cBtn.BackgroundColor3 = colorHex
+    cBtn.Text = ""
+    cBtn.Parent = tabs.ESP
+    Instance.new('UICorner', cBtn).CornerRadius = UDim.new(0, 6)
+    if colorHex == Color3.fromRGB(20, 20, 20) then
+        Instance.new('UIStroke', cBtn).Color = Color3.fromRGB(255, 255, 255)
+    else
+        local strk = Instance.new('UIStroke', cBtn)
+        strk.Color = Color3.fromRGB(153, 102, 255)
+        strk.Transparency = 0.6
+    end
+    cBtn.MouseButton1Click:Connect(function() _G.ESP_Color = colorHex end)
+end
+
+-- Misc Tab
+local speedToggleLabel = Instance.new('TextLabel')
+speedToggleLabel.Size = UDim2.new(0, 150, 0, 30)
+speedToggleLabel.Position = UDim2.new(0, 15, 0, 55)
+speedToggleLabel.Text = 'Speed Walk'
+speedToggleLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+speedToggleLabel.TextSize = 13
+speedToggleLabel.Font = Enum.Font.Gotham
+speedToggleLabel.BackgroundTransparency = 1
+speedToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedToggleLabel.Parent = tabs.Misc
+
+local speedToggleBtn = Instance.new('TextButton')
+speedToggleBtn.Size = UDim2.new(0, 50, 0, 22)
+speedToggleBtn.Position = UDim2.new(1, -65, 0, 59)
+speedToggleBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+speedToggleBtn.Text = 'OFF'
+speedToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedToggleBtn.Font = Enum.Font.GothamBold
+speedToggleBtn.TextSize = 11
+speedToggleBtn.Parent = tabs.Misc
+Instance.new('UICorner', speedToggleBtn).CornerRadius = UDim.new(0, 6)
+
+speedToggleBtn.MouseButton1Click:Connect(function()
+    _G.Speed_ToggleEnabled = not _G.Speed_ToggleEnabled
+    speedToggleBtn.Text = _G.Speed_ToggleEnabled and 'ON' or 'OFF'
+    speedToggleBtn.BackgroundColor3 = _G.Speed_ToggleEnabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+    _G.Speed_Enabled = _G.Speed_ToggleEnabled
+    if not _G.Speed_ToggleEnabled then
+        if me.Character and me.Character:FindFirstChild('Humanoid') then
+            me.Character.Humanoid.WalkSpeed = 16
+        end
+    end
+end)
+
+local keyLabel = Instance.new('TextLabel')
+keyLabel.Size = UDim2.new(0, 150, 0, 30)
+keyLabel.Position = UDim2.new(0, 15, 0, 95)
+keyLabel.Text = 'Speed Bind'
+keyLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+keyLabel.TextSize = 13
+keyLabel.Font = Enum.Font.Gotham
+keyLabel.BackgroundTransparency = 1
+keyLabel.TextXAlignment = Enum.TextXAlignment.Left
+keyLabel.Parent = tabs.Misc
+
+local bindBtn = Instance.new('TextButton')
+bindBtn.Size = UDim2.new(0, 70, 0, 22)
+bindBtn.Position = UDim2.new(1, -85, 0, 99)
+    bindBtn.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+bindBtn.Text = 'Key: X'
+bindBtn.TextColor3 = Color3.fromRGB(120, 60, 210)
+bindBtn.Font = Enum.Font.GothamBold
+bindBtn.TextSize = 11
+bindBtn.Parent = tabs.Misc
+Instance.new('UICorner', bindBtn).CornerRadius = UDim.new(0, 6)
+
+local isBinding = false
+bindBtn.MouseButton1Click:Connect(function()
+    isBinding = true
+    bindBtn.Text = '...'
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if isBinding and input.UserInputType == Enum.UserInputType.Keyboard then
+        _G.Speed_Key = input.KeyCode
+        bindBtn.Text = 'Key: ' .. input.KeyCode.Name
+        isBinding = false
+    end
+end)
+
+local speedValLabel = Instance.new('TextLabel')
+speedValLabel.Size = UDim2.new(1, -30, 0, 20)
+speedValLabel.Position = UDim2.new(0, 15, 0, 135)
+speedValLabel.Text = 'Speed Value: 50'
+speedValLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+speedValLabel.TextSize = 13
+speedValLabel.Font = Enum.Font.Gotham
+speedValLabel.BackgroundTransparency = 1
+speedValLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedValLabel.Parent = tabs.Misc
+
+local speedSlider = Instance.new('Frame')
+speedSlider.Size = UDim2.new(1, -30, 0, 6)
+speedSlider.Position = UDim2.new(0, 15, 0, 165)
+speedSlider.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+speedSlider.BorderSizePixel = 0
+speedSlider.Parent = tabs.Misc
+Instance.new('UICorner', speedSlider).CornerRadius = UDim.new(1, 0)
+
+local speedSliderBtn = Instance.new('TextButton')
+speedSliderBtn.Size = UDim2.new(0, 14, 0, 14)
+speedSliderBtn.Position = UDim2.new(0, 0, 0.5, -7)
+speedSliderBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+speedSliderBtn.BorderSizePixel = 0
+speedSliderBtn.Text = ""
+speedSliderBtn.Parent = speedSlider
+Instance.new('UICorner', speedSliderBtn).CornerRadius = UDim.new(1, 0)
+
+local speedInput = Instance.new('TextBox')
+speedInput.Size = UDim2.new(0, 60, 0, 22)
+speedInput.Position = UDim2.new(1, -75, 0, 135)
+speedInput.Text = tostring(_G.Speed_Value)
+speedInput.PlaceholderText = tostring(_G.Speed_Value)
+speedInput.TextColor3 = Color3.fromRGB(95, 38, 145)
+speedInput.TextSize = 12
+speedInput.Font = Enum.Font.Gotham
+speedInput.BackgroundColor3 = Color3.fromRGB(230, 220, 255)
+speedInput.BorderSizePixel = 0
+speedInput.BackgroundTransparency = 0
+speedInput.ClearTextOnFocus = false
+speedInput.TextXAlignment = Enum.TextXAlignment.Center
+speedInput.Parent = tabs.Misc
+Instance.new('UICorner', speedInput).CornerRadius = UDim.new(0, 6)
+
+local jumpToggleLabel = Instance.new('TextLabel')
+jumpToggleLabel.Size = UDim2.new(0, 150, 0, 30)
+jumpToggleLabel.Position = UDim2.new(0, 15, 0, 205)
+jumpToggleLabel.Text = 'Jump Power'
+jumpToggleLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+jumpToggleLabel.TextSize = 13
+jumpToggleLabel.Font = Enum.Font.Gotham
+jumpToggleLabel.BackgroundTransparency = 1
+jumpToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+jumpToggleLabel.Parent = tabs.Misc
+
+local jumpToggleBtn = Instance.new('TextButton')
+jumpToggleBtn.Size = UDim2.new(0, 50, 0, 22)
+jumpToggleBtn.Position = UDim2.new(1, -65, 0, 209)
+jumpToggleBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+jumpToggleBtn.Text = 'OFF'
+jumpToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+jumpToggleBtn.Font = Enum.Font.GothamBold
+jumpToggleBtn.TextSize = 11
+jumpToggleBtn.Parent = tabs.Misc
+Instance.new('UICorner', jumpToggleBtn).CornerRadius = UDim.new(0, 6)
+
+jumpToggleBtn.MouseButton1Click:Connect(function()
+    _G.JumpPower_ToggleEnabled = not _G.JumpPower_ToggleEnabled
+    jumpToggleBtn.Text = _G.JumpPower_ToggleEnabled and 'ON' or 'OFF'
+    jumpToggleBtn.BackgroundColor3 = _G.JumpPower_ToggleEnabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+    _G.JumpPower_Enabled = _G.JumpPower_ToggleEnabled
+    if not _G.JumpPower_ToggleEnabled then
+        if me.Character and me.Character:FindFirstChild('Humanoid') then
+            me.Character.Humanoid.JumpPower = 50
+        end
+    end
+end)
+
+local jumpKeyLabel = Instance.new('TextLabel')
+jumpKeyLabel.Size = UDim2.new(0, 150, 0, 30)
+jumpKeyLabel.Position = UDim2.new(0, 15, 0, 245)
+jumpKeyLabel.Text = 'Jump Bind'
+jumpKeyLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+jumpKeyLabel.TextSize = 13
+jumpKeyLabel.Font = Enum.Font.Gotham
+jumpKeyLabel.BackgroundTransparency = 1
+jumpKeyLabel.TextXAlignment = Enum.TextXAlignment.Left
+jumpKeyLabel.Parent = tabs.Misc
+
+local jumpBindBtn = Instance.new('TextButton')
+jumpBindBtn.Size = UDim2.new(0, 70, 0, 22)
+jumpBindBtn.Position = UDim2.new(1, -85, 0, 249)
+    jumpBindBtn.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+jumpBindBtn.Text = 'Key: Z'
+    jumpBindBtn.TextColor3 = Color3.fromRGB(120, 60, 210)
+jumpBindBtn.Font = Enum.Font.GothamBold
+jumpBindBtn.TextSize = 11
+jumpBindBtn.Parent = tabs.Misc
+Instance.new('UICorner', jumpBindBtn).CornerRadius = UDim.new(0, 6)
+
+local jumpIsBinding = false
+jumpBindBtn.MouseButton1Click:Connect(function()
+    jumpIsBinding = true
+    jumpBindBtn.Text = '...'
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if jumpIsBinding and input.UserInputType == Enum.UserInputType.Keyboard then
+        _G.JumpPower_Key = input.KeyCode
+        jumpBindBtn.Text = 'Key: ' .. input.KeyCode.Name
+        jumpIsBinding = false
+    end
+end)
+
+local jumpValLabel = Instance.new('TextLabel')
+jumpValLabel.Size = UDim2.new(1, -30, 0, 20)
+jumpValLabel.Position = UDim2.new(0, 15, 0, 285)
+jumpValLabel.Text = 'Jump Value: 50'
+jumpValLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+jumpValLabel.TextSize = 13
+jumpValLabel.Font = Enum.Font.Gotham
+jumpValLabel.BackgroundTransparency = 1
+jumpValLabel.TextXAlignment = Enum.TextXAlignment.Left
+jumpValLabel.Parent = tabs.Misc
+
+local jumpSlider = Instance.new('Frame')
+jumpSlider.Size = UDim2.new(1, -30, 0, 6)
+jumpSlider.Position = UDim2.new(0, 15, 0, 315)
+jumpSlider.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+jumpSlider.BorderSizePixel = 0
+jumpSlider.Parent = tabs.Misc
+Instance.new('UICorner', jumpSlider).CornerRadius = UDim.new(1, 0)
+
+local jumpSliderBtn = Instance.new('TextButton')
+jumpSliderBtn.Size = UDim2.new(0, 14, 0, 14)
+jumpSliderBtn.Position = UDim2.new(0, 0, 0.5, -7)
+jumpSliderBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+jumpSliderBtn.BorderSizePixel = 0
+jumpSliderBtn.Text = ""
+jumpSliderBtn.Parent = jumpSlider
+Instance.new('UICorner', jumpSliderBtn).CornerRadius = UDim.new(1, 0)
+
+local jumpInput = Instance.new('TextBox')
+jumpInput.Size = UDim2.new(0, 60, 0, 22)
+jumpInput.Position = UDim2.new(1, -75, 0, 285)
+jumpInput.Text = tostring(_G.JumpPower_Value)
+jumpInput.PlaceholderText = tostring(_G.JumpPower_Value)
+jumpInput.TextColor3 = Color3.fromRGB(95, 38, 145)
+jumpInput.TextSize = 12
+jumpInput.Font = Enum.Font.Gotham
+jumpInput.BackgroundColor3 = Color3.fromRGB(230, 220, 255)
+jumpInput.BorderSizePixel = 0
+jumpInput.BackgroundTransparency = 0
+jumpInput.ClearTextOnFocus = false
+jumpInput.TextXAlignment = Enum.TextXAlignment.Center
+jumpInput.Parent = tabs.Misc
+Instance.new('UICorner', jumpInput).CornerRadius = UDim.new(0, 6)
+
+local whitelistLabel = Instance.new('TextLabel')
+whitelistLabel.Size = UDim2.new(1, -30, 0, 30)
+whitelistLabel.Position = UDim2.new(0, 15, 0, 55)
+whitelistLabel.Text = 'Click players to add/remove from whitelist:'
+whitelistLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+whitelistLabel.TextSize = 13
+whitelistLabel.Font = Enum.Font.Gotham
+whitelistLabel.BackgroundTransparency = 1
+whitelistLabel.TextXAlignment = Enum.TextXAlignment.Left
+whitelistLabel.Parent = tabs.Whitelist
+
+local whitelistListFrame = Instance.new('ScrollingFrame')
+whitelistListFrame.Size = UDim2.new(1, -30, 1, -95)
+whitelistListFrame.Position = UDim2.new(0, 15, 0, 90)
+    whitelistListFrame.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+whitelistListFrame.BorderSizePixel = 0
+whitelistListFrame.ScrollBarThickness = 4
+whitelistListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+whitelistListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+whitelistListFrame.Parent = tabs.Whitelist
+Instance.new('UICorner', whitelistListFrame).CornerRadius = UDim.new(0, 10)
+
+local whitelistListLayout = Instance.new('UIListLayout')
+whitelistListLayout.Padding = UDim.new(0, 8)
+whitelistListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+whitelistListLayout.Parent = whitelistListFrame
+
+local whitelistEmptyLabel = Instance.new('TextLabel')
+whitelistEmptyLabel.Size = UDim2.new(1, -20, 0, 40)
+whitelistEmptyLabel.Position = UDim2.new(0, 10, 0, 10)
+whitelistEmptyLabel.Text = 'No other players in the server.'
+whitelistEmptyLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+whitelistEmptyLabel.TextSize = 12
+whitelistEmptyLabel.Font = Enum.Font.Gotham
+whitelistEmptyLabel.BackgroundTransparency = 1
+whitelistEmptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+whitelistEmptyLabel.Parent = whitelistListFrame
+
+local function refreshWhitelistList()
+    for _, child in ipairs(whitelistListFrame:GetChildren()) do
+        if child:IsA('TextButton') then
+            child:Destroy()
+        end
+    end
+
+    whitelistEmptyLabel.Visible = true
+
+    local players = {}
+    for _, p in ipairs(plrs:GetPlayers()) do
+        if p ~= me then
+            table.insert(players, p)
+        end
+    end
+
+    table.sort(players, function(a, b)
+        return a.DisplayName:lower() < b.DisplayName:lower()
+    end)
+
+    if #players > 0 then
+        whitelistEmptyLabel.Visible = false
+    end
+
+    for i, p in ipairs(players) do
+        local item = Instance.new('TextButton')
+        item.Size = UDim2.new(1, -12, 0, 48)
+        item.BackgroundColor3 = isWhitelisted(p) and Color3.fromRGB(235, 230, 250) or Color3.fromRGB(245, 240, 250)
+        item.Text = ""
+        item.AutoButtonColor = false
+        item.Parent = whitelistListFrame
+        item.LayoutOrder = i
+        Instance.new('UICorner', item).CornerRadius = UDim.new(0, 8)
+
+        local displayLabel = Instance.new('TextLabel')
+        displayLabel.Size = UDim2.new(1, -20, 0, 20)
+        displayLabel.Position = UDim2.new(0, 10, 0, 8)
+        displayLabel.Text = p.DisplayName
+        displayLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+        displayLabel.TextSize = 13
+        displayLabel.Font = Enum.Font.GothamBold
+        displayLabel.BackgroundTransparency = 1
+        displayLabel.TextXAlignment = Enum.TextXAlignment.Left
+        displayLabel.Parent = item
+
+        local usernameLabel = Instance.new('TextLabel')
+        usernameLabel.Size = UDim2.new(1, -20, 0, 16)
+        usernameLabel.Position = UDim2.new(0, 10, 0, 26)
+        usernameLabel.Text = '@' .. p.Name
+        usernameLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+        usernameLabel.TextSize = 11
+        usernameLabel.Font = Enum.Font.Gotham
+        usernameLabel.BackgroundTransparency = 1
+        usernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        usernameLabel.Parent = item
+
+        item.MouseButton1Click:Connect(function()
+            toggleWhitelist(p)
+            refreshWhitelistList()
+        end)
+    end
+end
+
+_G.Teleport_Key = Enum.KeyCode.T
+local selectedTeleportPlayer = nil
+local teleportLoopActive = false
+local isChoosingTeleportKey = false
+
+local tpLabel = Instance.new('TextLabel')
+tpLabel.Size = UDim2.new(1, -30, 0, 30)
+tpLabel.Position = UDim2.new(0, 15, 0, 55)
+tpLabel.Text = 'Select a player and use your teleport key:'
+tpLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+tpLabel.TextSize = 13
+tpLabel.Font = Enum.Font.Gotham
+tpLabel.BackgroundTransparency = 1
+tpLabel.TextXAlignment = Enum.TextXAlignment.Left
+tpLabel.Parent = tabs.Teleport
+
+local teleportSelectionLabel = Instance.new('TextLabel')
+teleportSelectionLabel.Size = UDim2.new(1, -30, 0, 24)
+teleportSelectionLabel.Position = UDim2.new(0, 15, 0, 80)
+teleportSelectionLabel.Text = 'Selected: None'
+teleportSelectionLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+teleportSelectionLabel.TextSize = 12
+teleportSelectionLabel.Font = Enum.Font.Gotham
+teleportSelectionLabel.BackgroundTransparency = 1
+teleportSelectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+teleportSelectionLabel.Parent = tabs.Teleport
+
+local teleportKeyButton = Instance.new('TextButton')
+teleportKeyButton.Size = UDim2.new(0, 120, 0, 24)
+teleportKeyButton.Position = UDim2.new(1, -135, 0, 80)
+teleportKeyButton.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+teleportKeyButton.Text = 'Key: T'
+teleportKeyButton.TextColor3 = Color3.fromRGB(180, 140, 255)
+teleportKeyButton.Font = Enum.Font.GothamBold
+teleportKeyButton.TextSize = 11
+teleportKeyButton.Parent = tabs.Teleport
+Instance.new('UICorner', teleportKeyButton).CornerRadius = UDim.new(0, 6)
+
+local tpListFrame = Instance.new('ScrollingFrame')
+tpListFrame.Size = UDim2.new(1, -30, 1, -115)
+tpListFrame.Position = UDim2.new(0, 15, 0, 110)
+tpListFrame.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+tpListFrame.BorderSizePixel = 0
+tpListFrame.ScrollBarThickness = 4
+tpListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+tpListFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+tpListFrame.Parent = tabs.Teleport
+Instance.new('UICorner', tpListFrame).CornerRadius = UDim.new(0, 10)
+
+local tpListLayout = Instance.new('UIListLayout')
+tpListLayout.Padding = UDim.new(0, 8)
+tpListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tpListLayout.Parent = tpListFrame
+
+local tpEmptyLabel = Instance.new('TextLabel')
+tpEmptyLabel.Size = UDim2.new(1, -20, 0, 40)
+tpEmptyLabel.Position = UDim2.new(0, 10, 0, 10)
+tpEmptyLabel.Text = 'No other players in the server.'
+tpEmptyLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+tpEmptyLabel.TextSize = 12
+tpEmptyLabel.Font = Enum.Font.Gotham
+tpEmptyLabel.BackgroundTransparency = 1
+tpEmptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+tpEmptyLabel.Parent = tpListFrame
+
+local function teleportToPlayer(player)
+    if not player then return false end
+    if me.Character and me.Character:FindFirstChild('HumanoidRootPart') and player.Character and player.Character:FindFirstChild('HumanoidRootPart') then
+        me.Character.HumanoidRootPart.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, 3)
+        return true
+    end
+    return false
+end
+
+local function updateTeleportSelection(player)
+    selectedTeleportPlayer = player
+    if player then
+        teleportSelectionLabel.Text = 'Selected: ' .. (player.DisplayName or player.Name)
+    else
+        teleportSelectionLabel.Text = 'Selected: None'
+    end
+end
+
+local function refreshTeleportList()
+    for _, child in ipairs(tpListFrame:GetChildren()) do
+        if child:IsA('TextButton') then
+            child:Destroy()
+        end
+    end
+
+    tpEmptyLabel.Visible = true
+
+    local players = {}
+    for _, p in ipairs(plrs:GetPlayers()) do
+        if p ~= me then
+            table.insert(players, p)
+        end
+    end
+
+    table.sort(players, function(a, b)
+        return a.DisplayName:lower() < b.DisplayName:lower()
+    end)
+
+    if #players > 0 then
+        tpEmptyLabel.Visible = false
+    end
+
+    for i, p in ipairs(players) do
+        local item = Instance.new('TextButton')
+        item.Size = UDim2.new(1, -12, 0, 48)
+        item.BackgroundColor3 = (selectedTeleportPlayer == p) and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+        item.Text = ""
+        item.AutoButtonColor = false
+        item.Parent = tpListFrame
+        item.LayoutOrder = i
+        Instance.new('UICorner', item).CornerRadius = UDim.new(0, 8)
+
+        local displayLabel = Instance.new('TextLabel')
+        displayLabel.Size = UDim2.new(1, -20, 0, 20)
+        displayLabel.Position = UDim2.new(0, 10, 0, 8)
+        displayLabel.Text = p.DisplayName
+        displayLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+        displayLabel.TextSize = 13
+        displayLabel.Font = Enum.Font.GothamBold
+        displayLabel.BackgroundTransparency = 1
+        displayLabel.TextXAlignment = Enum.TextXAlignment.Left
+        displayLabel.Parent = item
+
+        local usernameLabel = Instance.new('TextLabel')
+        usernameLabel.Size = UDim2.new(1, -20, 0, 16)
+        usernameLabel.Position = UDim2.new(0, 10, 0, 26)
+        usernameLabel.Text = '@' .. p.Name
+        usernameLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+        usernameLabel.TextSize = 11
+        usernameLabel.Font = Enum.Font.Gotham
+        usernameLabel.BackgroundTransparency = 1
+        usernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        usernameLabel.Parent = item
+
+        item.MouseButton1Click:Connect(function()
+            updateTeleportSelection(p)
+            refreshTeleportList()
+        end)
+    end
+end
+
+teleportKeyButton.MouseButton1Click:Connect(function()
+    isChoosingTeleportKey = true
+    teleportKeyButton.Text = 'Press a key...'
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if isChoosingTeleportKey and input.UserInputType == Enum.UserInputType.Keyboard then
+        _G.Teleport_Key = input.KeyCode
+        teleportKeyButton.Text = 'Key: ' .. input.KeyCode.Name
+        isChoosingTeleportKey = false
+    elseif input.KeyCode == _G.Teleport_Key and not isChoosingTeleportKey and selectedTeleportPlayer then
+        if not teleportLoopActive then
+            teleportLoopActive = true
+            teleportToPlayer(selectedTeleportPlayer)
+            task.spawn(function()
+                while teleportLoopActive do
+                    if selectedTeleportPlayer then
+                        teleportToPlayer(selectedTeleportPlayer)
+                    end
+                    task.wait(0.15)
+                    if not UIS:IsKeyDown(_G.Teleport_Key) then
+                        teleportLoopActive = false
+                        break
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+UIS.InputEnded:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == _G.Teleport_Key then
+        teleportLoopActive = false
+    end
+end)
+
+local function applyHeadlessState(character)
+    if not character then return end
+    local head = character:FindFirstChild("Head")
+    if not head or not head:IsA("BasePart") then return end
+
+    local enabled = _G.Headless_Enabled
+    head.Transparency = enabled and 1 or 0
+    head.LocalTransparencyModifier = enabled and 1 or 0
+
+    if enabled then
+        head.Material = Enum.Material.ForceField
+    else
+        head.Material = Enum.Material.SmoothPlastic
+    end
+end
+
+me.CharacterAdded:Connect(function(character)
+    local humanoid = character:WaitForChild("Humanoid", 5)
+    if not humanoid then return end
+
+    task.defer(function()
+        task.wait(0.1)
+        applyHeadlessState(character)
+    end)
+end)
+
+game:GetService("RunService").Heartbeat:Connect(function()
+    local character = me.Character
+    if character then
+        applyHeadlessState(character)
+    end
+end)
+
+if me.Character then
+    applyHeadlessState(me.Character)
+end
+
+local avatarLabel = Instance.new('TextLabel')
+avatarLabel.Size = UDim2.new(1, -30, 0, 30)
+avatarLabel.Position = UDim2.new(0, 15, 0, 55)
+avatarLabel.Text = 'Headless'
+avatarLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+avatarLabel.TextSize = 13
+avatarLabel.Font = Enum.Font.Gotham
+avatarLabel.BackgroundTransparency = 1
+avatarLabel.TextXAlignment = Enum.TextXAlignment.Left
+avatarLabel.Parent = tabs.Avatar
+
+local avatarToggleBtn = Instance.new('TextButton')
+avatarToggleBtn.Size = UDim2.new(0, 50, 0, 22)
+avatarToggleBtn.Position = UDim2.new(1, -65, 0, 59)
+avatarToggleBtn.BackgroundColor3 = Color3.fromRGB(245, 240, 250)
+avatarToggleBtn.Text = 'OFF'
+avatarToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+avatarToggleBtn.Font = Enum.Font.GothamBold
+avatarToggleBtn.TextSize = 11
+avatarToggleBtn.Parent = tabs.Avatar
+Instance.new('UICorner', avatarToggleBtn).CornerRadius = UDim.new(0, 6)
+
+avatarToggleBtn.MouseButton1Click:Connect(function()
+    _G.Headless_Enabled = not _G.Headless_Enabled
+    avatarToggleBtn.Text = _G.Headless_Enabled and 'ON' or 'OFF'
+    avatarToggleBtn.BackgroundColor3 = _G.Headless_Enabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+    applyHeadlessState(me.Character)
+end)
+
+local hideUiLabel = Instance.new('TextLabel')
+hideUiLabel.Size = UDim2.new(0, 150, 0, 30)
+hideUiLabel.Position = UDim2.new(0, 15, 0, 55)
+hideUiLabel.Text = 'Hide UI'
+hideUiLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+hideUiLabel.TextSize = 13
+hideUiLabel.Font = Enum.Font.Gotham
+hideUiLabel.BackgroundTransparency = 1
+hideUiLabel.TextXAlignment = Enum.TextXAlignment.Left
+hideUiLabel.Parent = tabs.Settings
+
+local hideUiBtn = Instance.new('TextButton')
+hideUiBtn.Size = UDim2.new(0, 50, 0, 22)
+hideUiBtn.Position = UDim2.new(1, -65, 0, 59)
+hideUiBtn.BackgroundColor3 = Color3.fromRGB(170, 130, 255)
+hideUiBtn.Text = 'ON'
+hideUiBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+hideUiBtn.Font = Enum.Font.GothamBold
+hideUiBtn.TextSize = 11
+hideUiBtn.Parent = tabs.Settings
+Instance.new('UICorner', hideUiBtn).CornerRadius = UDim.new(0, 6)
+
+local hideUiKeyLabel = Instance.new('TextLabel')
+hideUiKeyLabel.Size = UDim2.new(0, 150, 0, 30)
+hideUiKeyLabel.Position = UDim2.new(0, 15, 0, 95)
+hideUiKeyLabel.Text = 'Hide UI Key'
+hideUiKeyLabel.TextColor3 = Color3.fromRGB(180, 140, 255)
+hideUiKeyLabel.TextSize = 13
+hideUiKeyLabel.Font = Enum.Font.Gotham
+hideUiKeyLabel.BackgroundTransparency = 1
+hideUiKeyLabel.TextXAlignment = Enum.TextXAlignment.Left
+hideUiKeyLabel.Parent = tabs.Settings
+
+local hideUiKeyBtn = Instance.new('TextButton')
+hideUiKeyBtn.Size = UDim2.new(0, 90, 0, 22)
+hideUiKeyBtn.Position = UDim2.new(1, -105, 0, 99)
+hideUiKeyBtn.BackgroundColor3 = Color3.fromRGB(235, 230, 250)
+hideUiKeyBtn.Text = 'Key: RightShift'
+hideUiKeyBtn.TextColor3 = Color3.fromRGB(180, 140, 255)
+hideUiKeyBtn.Font = Enum.Font.GothamBold
+hideUiKeyBtn.TextSize = 11
+hideUiKeyBtn.Parent = tabs.Settings
+Instance.new('UICorner', hideUiKeyBtn).CornerRadius = UDim.new(0, 6)
+
+_G.HideUi_Enabled = true
+_G.HideUi_Key = Enum.KeyCode.RightShift
+local isChoosingHideKey = false
+
+hideUiBtn.MouseButton1Click:Connect(function()
+    _G.HideUi_Enabled = not _G.HideUi_Enabled
+    hideUiBtn.Text = _G.HideUi_Enabled and 'ON' or 'OFF'
+    hideUiBtn.BackgroundColor3 = _G.HideUi_Enabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
+end)
+
+hideUiKeyBtn.MouseButton1Click:Connect(function()
+    isChoosingHideKey = true
+    hideUiKeyBtn.Text = '...'
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if isChoosingHideKey and input.UserInputType == Enum.UserInputType.Keyboard then
+        _G.HideUi_Key = input.KeyCode
+        hideUiKeyBtn.Text = 'Key: ' .. input.KeyCode.Name
+        isChoosingHideKey = false
+    elseif input.KeyCode == _G.HideUi_Key and not isChoosingHideKey and _G.HideUi_Enabled then
+        if frame.Visible then
+            hideGui()
+        else
+            showGui()
+        end
+    end
+end)
+
+refreshWhitelistList()
+refreshTeleportList()
+local moveConnection1
+local function updateSlider1(input)
+    local percentage = math.clamp((input.Position.X - slider.AbsolutePosition.X) / slider.AbsoluteSize.X, 0, 1)
+    button.Position = UDim2.new(percentage, -7, 0.5, -7)
+    local finalValue = math.round(percentage * fovMax)
+    if fovInput and fovInput:IsA('TextBox') then
+        fovInput.Text = tostring(finalValue)
+    end
+    _G.FOV_RADIUS = finalValue
+end
+
+button.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        moveConnection1 = UIS.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch then
+                updateSlider1(moveInput)
+            end
+        end)
+    end
+end)
+
+local moveConnection2
+local function updateSlider2(input)
+    local percentage = math.clamp((input.Position.X - spreadSlider.AbsolutePosition.X) / spreadSlider.AbsoluteSize.X, 0, 1)
+    spreadBtn.Position = UDim2.new(percentage, -7, 0.5, -7)
+    local finalValue = math.round(percentage * 100)
+    syncSpreadUI(finalValue)
+end
+
+local function stopSpreadDrag()
+    if moveConnection2 then
+        moveConnection2:Disconnect()
+        moveConnection2 = nil
+    end
+end
+
+fovInput.FocusLost:Connect(function(enterPressed)
+    local value = tonumber(fovInput.Text)
+    if not value then
+        fovInput.Text = tostring(_G.FOV_RADIUS)
+        return
+    end
+    local clamped = math.clamp(value, 0, fovMax)
+    _G.FOV_RADIUS = clamped
+    local percent = fovMax > 0 and clamped / fovMax or 0
+    button.Position = UDim2.new(percent, -7, 0.5, -7)
+    fovInput.Text = tostring(clamped)
+end)
+
+spreadInput.FocusLost:Connect(function(enterPressed)
+    local value = tonumber(spreadInput.Text)
+    if not value then
+        syncSpreadUI(_0x52a0d5.BulletSpread.Amount)
+        return
+    end
+    syncSpreadUI(value)
+end)
+
+spreadBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        stopSpreadDrag()
+        moveConnection2 = UIS.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch then
+                updateSlider2(moveInput)
+            end
+        end)
+    end
+end)
+
+spreadBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        stopSpreadDrag()
+    end
+end)
+
+local moveConnection4
+local function updateSpeedSlider(input)
+    local percentage = math.clamp((input.Position.X - speedSlider.AbsolutePosition.X) / speedSlider.AbsoluteSize.X, 0, 1)
+    speedSliderBtn.Position = UDim2.new(percentage, -7, 0.5, -7)
+    local finalValue = math.round(16 + (percentage * 984))
+    speedValLabel.Text = 'Speed Value: ' .. tostring(finalValue)
+    if speedInput and speedInput:IsA('TextBox') then
+        speedInput.Text = tostring(finalValue)
+    end
+    _G.Speed_Value = finalValue
+end
+
+speedSliderBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        moveConnection4 = UIS.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch then
+                updateSpeedSlider(moveInput)
+            end
+        end)
+    end
+end)
+
+local moveConnection5
+local function updateJumpSlider(input)
+    local percentage = math.clamp((input.Position.X - jumpSlider.AbsolutePosition.X) / jumpSlider.AbsoluteSize.X, 0, 1)
+    jumpSliderBtn.Position = UDim2.new(percentage, -7, 0.5, -7)
+    local finalValue = math.round(50 + (percentage * 950))
+    jumpValLabel.Text = 'Jump Value: ' .. tostring(finalValue)
+    if jumpInput and jumpInput:IsA('TextBox') then
+        jumpInput.Text = tostring(finalValue)
+    end
+    _G.JumpPower_Value = finalValue
+end
+
+jumpSliderBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        moveConnection5 = UIS.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement or moveInput.UserInputType == Enum.UserInputType.Touch then
+                updateJumpSlider(moveInput)
+            end
+        end)
+    end
+end)
+
+jumpInput.FocusLost:Connect(function(enterPressed)
+    local value = tonumber(jumpInput.Text)
+    if not value then
+        jumpInput.Text = tostring(_G.JumpPower_Value)
+        return
+    end
+    local clamped = math.clamp(value, 50, 1000)
+    _G.JumpPower_Value = clamped
+    jumpValLabel.Text = 'Jump Value: ' .. tostring(clamped)
+    local percent = (clamped - 50) / 950
+    jumpSliderBtn.Position = UDim2.new(percent, -7, 0.5, -7)
+    jumpInput.Text = tostring(clamped)
+end)
+
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == _G.Speed_Key and not isBinding and _G.Speed_ToggleEnabled then
+        _G.Speed_Enabled = not _G.Speed_Enabled
+    end
+    if input.KeyCode == _G.JumpPower_Key and not jumpIsBinding and _G.JumpPower_ToggleEnabled then
+        _G.JumpPower_Enabled = not _G.JumpPower_Enabled
+    end
+end)
+
+local function createESP(player)
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Thickness = 1.5
+    box.Filled = false
+    
+    local name = Drawing.new("Text")
+    name.Visible = false
+    name.Size = 16
+    name.Center = true
+    name.Outline = true
+    name.Font = Drawing.Fonts.UI
+
+    local healthBarBg = Drawing.new("Square")
+    healthBarBg.Visible = false
+    healthBarBg.Filled = true
+    healthBarBg.Thickness = 0
+    healthBarBg.Color = Color3.fromRGB(20, 20, 20)
+
+    local healthBar = Drawing.new("Square")
+    healthBar.Visible = false
+    healthBar.Filled = true
+    healthBar.Thickness = 0
+    healthBar.Color = Color3.fromRGB(80, 220, 80)
+
+    local conn
+    conn = game:GetService("RunService").RenderStepped:Connect(function()
+        if isWhitelisted(player) then
+            box.Visible = false
+            name.Visible = false
+            healthBarBg.Visible = false
+            healthBar.Visible = false
+            return
+        end
+
+        if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local rootPart = player.Character.HumanoidRootPart
+            local head = player.Character:FindFirstChild("Head") or rootPart
+            local rootPos, rootOnScreen = cam:WorldToViewportPoint(rootPart.Position)
+            
+            if rootOnScreen then
+                local headPos = cam:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                local legPos = cam:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0))
+                local boxHeight = math.abs(headPos.Y - legPos.Y)
+                local boxWidth = boxHeight / 2
+
+                if _G.ESP_Boxes then
+                    box.Size = Vector2.new(boxWidth, boxHeight)
+                    box.Position = Vector2.new(rootPos.X - boxWidth / 2, rootPos.Y - boxHeight / 2)
+                    box.Color = _G.ESP_Color
+                    box.Visible = true
+                else box.Visible = false end
+
+                if _G.ESP_Names then
+                    name.Position = Vector2.new(rootPos.X, rootPos.Y - boxHeight / 2 - 18)
+                    name.Text = player.DisplayName
+                    name.Color = _G.ESP_Color
+                    name.Visible = true
+                else name.Visible = false end
+
+                if _G.ESP_Health then
+                    local healthPct = math.clamp(player.Character.Humanoid.Health / math.max(1, player.Character.Humanoid.MaxHealth), 0, 1)
+                    local barWidth = 3
+                    local barHeight = math.clamp(boxHeight * 0.7, 24, 140)
+                    local barX = rootPos.X + boxWidth / 2 + 6
+                    local barY = rootPos.Y - barHeight / 2
+
+                    healthBarBg.Size = Vector2.new(barWidth, barHeight)
+                    healthBarBg.Position = Vector2.new(barX, barY)
+                    healthBarBg.Visible = true
+
+                    healthBar.Size = Vector2.new(barWidth, barHeight * healthPct)
+                    healthBar.Position = Vector2.new(barX, barY + barHeight * (1 - healthPct))
+                    healthBar.Color = Color3.fromHSV(math.clamp(healthPct, 0, 1) * 0.33, 1, 1)
+                    healthBar.Visible = true
+                else
+                    healthBarBg.Visible = false
+                    healthBar.Visible = false
+                end
+            else
+                box.Visible = false
+                name.Visible = false
+                healthBarBg.Visible = false
+                healthBar.Visible = false
+            end
+        else
+            box.Visible = false
+            name.Visible = false
+            healthBarBg.Visible = false
+            healthBar.Visible = false
+            if not player or not player.Parent then
+                box:Remove()
+                name:Remove()
+                healthBarBg:Remove()
+                healthBar:Remove()
+                conn:Disconnect()
+            end
+        end
+    end)
+end
+
+for _, p in pairs(plrs:GetPlayers()) do if p ~= me then createESP(p) end end
+plrs.PlayerAdded:Connect(function(p) if p ~= me then createESP(p) end end)
+plrs.PlayerAdded:Connect(function()
+    refreshTeleportList()
+    refreshWhitelistList()
+end)
+plrs.PlayerRemoving:Connect(function()
+    refreshTeleportList()
+    refreshWhitelistList()
+end)
+
+game:GetService("RunService").Heartbeat:Connect(function()
+    if _G.Speed_Enabled and me.Character and me.Character:FindFirstChild("Humanoid") then
+        me.Character.Humanoid.WalkSpeed = _G.Speed_Value
+    elseif not _G.Speed_Enabled and me.Character and me.Character:FindFirstChild("Humanoid") then
+        if me.Character.Humanoid.WalkSpeed == _G.Speed_Value then
+            me.Character.Humanoid.WalkSpeed = 16
+        end
+    end
+
+    if _G.JumpPower_Enabled and me.Character and me.Character:FindFirstChild("Humanoid") then
+        me.Character.Humanoid.JumpPower = _G.JumpPower_Value
+    elseif not _G.JumpPower_Enabled and me.Character and me.Character:FindFirstChild("Humanoid") then
+        if me.Character.Humanoid.JumpPower == _G.JumpPower_Value then
+            me.Character.Humanoid.JumpPower = 50
+        end
+    end
+end)
+
+-- Camera lock: keep camera aimed at locked player's target while allowing normal mouse movement
+local lastMouseDelta = Vector2.new(0, 0)
+local mouseMoveCooldown = 0
+
+game:GetService('RunService').RenderStepped:Connect(function()
+    if _G.CamLock_Enabled then
+        local mouseDelta = UIS:GetMouseDelta()
+        lastMouseDelta = mouseDelta
+        mouseMoveCooldown = math.max(0, mouseMoveCooldown - 1)
+
+        if mouseDelta.Magnitude > 0.01 then
+            mouseMoveCooldown = 8
+            lastCamLockDir = cam.CFrame.LookVector
+            if lockedLabel then
+                lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
+            end
+            return
+        end
+
+        if mouseMoveCooldown > 0 then
+            if lockedLabel then
+                lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
+            end
+            return
+        end
+
+        if lastLockedPlayer and currentCamLockTargetPart then
+            local humanoid = lastLockedPlayer.Character and lastLockedPlayer.Character:FindFirstChild('Humanoid')
+            if humanoid and humanoid.Health > 0 and currentCamLockTargetPart and currentCamLockTargetPart.Parent then
+                local targetDir = (currentCamLockTargetPart.Position - cam.CFrame.Position)
+                if targetDir.Magnitude > 0 then
+                    targetDir = targetDir.Unit
+                    local smoothness = math.clamp(_G.CamLock_Smoothness or 0.2, 0.1, 1)
+                    local t = (smoothness - 0.1) / 0.9
+                    local alpha = 0.01 + 0.99 * (t * t * t)
+                    if not lastCamLockDir then
+                        lastCamLockDir = cam.CFrame.LookVector
+                    end
+                    local blended = (lastCamLockDir * (1 - alpha) + targetDir * alpha)
+                    if blended.Magnitude > 0 then
+                        lastCamLockDir = blended.Unit
+                        cam.CFrame = CFrame.new(cam.CFrame.Position, cam.CFrame.Position + lastCamLockDir)
+                    end
+                    if lockedLabel then
+                        lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer.DisplayName or lastLockedPlayer.Name)
+                    end
+                    return
+                end
+            end
+        end
+
+        if lockedLabel then
+            lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
+        end
+        return
+    end
+
+    if lockedLabel then
+        lockedLabel.Text = 'Locked: None'
+    end
+end)
+
+local uiVisible = true
+UIS.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == _G.HideUi_Key and not isChoosingHideKey and _G.HideUi_Enabled then
+        uiVisible = not uiVisible
+        if uiVisible then
+            showGui()
+        else
+            hideGui()
+        end
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if moveConnection1 then moveConnection1:Disconnect() moveConnection1 = nil end
+        if moveConnection2 then moveConnection2:Disconnect() moveConnection2 = nil end
+        if moveConnection4 then moveConnection4:Disconnect() moveConnection4 = nil end
+        if moveConnection5 then moveConnection5:Disconnect() moveConnection5 = nil end
+    end
+end)
