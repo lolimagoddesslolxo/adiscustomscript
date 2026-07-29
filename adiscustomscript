@@ -784,6 +784,35 @@ local function getLockPart(character)
     return getTargetPart(character) or character:FindFirstChild('Head')
 end
 
+local function setCamLockTarget(targetPlayer, targetPart)
+    lastLockedPlayer = targetPlayer
+    currentCamLockTargetPart = targetPart
+    if targetPlayer and targetPart then
+        local rootPos = me.Character and me.Character:FindFirstChild('HumanoidRootPart') and me.Character.HumanoidRootPart.Position or nil
+        if rootPos then
+            local direction = targetPart.Position - rootPos
+            lastCamLockDir = direction.Magnitude > 0 and direction.Unit or cam.CFrame.LookVector
+        else
+            lastCamLockDir = cam.CFrame.LookVector
+        end
+        lockedLabel.Text = 'Locked: ' .. (targetPlayer.DisplayName or targetPlayer.Name)
+    else
+        lastCamLockDir = nil
+        lockedLabel.Text = 'Locked: None'
+    end
+end
+
+local function getCamLockTargetToUse()
+    if lastLockedPlayer and currentCamLockTargetPart then
+        local character = lastLockedPlayer.Character
+        local humanoid = character and character:FindFirstChild('Humanoid')
+        if character and humanoid and humanoid.Health > 0 and currentCamLockTargetPart and currentCamLockTargetPart.Parent and currentCamLockTargetPart:IsDescendantOf(character) then
+            return lastLockedPlayer, currentCamLockTargetPart
+        end
+    end
+    return getCamLockTargetForCursor()
+end
+
 local function getCamLockTargetForCursor()
     local mousePos = Vector2.new(mouse.X, mouse.Y)
     local bestPlayer, bestPart = nil, nil
@@ -819,18 +848,8 @@ local function updateCamLockState(enabled)
     camLockToggleBtn.Text = _G.CamLock_Enabled and 'ON' or 'OFF'
     camLockToggleBtn.BackgroundColor3 = _G.CamLock_Enabled and Color3.fromRGB(170, 130, 255) or Color3.fromRGB(245, 240, 250)
     if _G.CamLock_Enabled then
-        local targetPlayer, targetPart = getCamLockTargetForCursor()
-        lastLockedPlayer = targetPlayer
-        currentCamLockTargetPart = targetPart
-        if targetPlayer and targetPart and me.Character and me.Character:FindFirstChild('HumanoidRootPart') then
-            local rootPos = me.Character.HumanoidRootPart.Position
-            local direction = targetPart.Position - rootPos
-            lastCamLockDir = direction.Magnitude > 0 and direction.Unit or cam.CFrame.LookVector
-            lockedLabel.Text = 'Locked: ' .. (targetPlayer.DisplayName or targetPlayer.Name)
-        else
-            lastCamLockDir = nil
-            lockedLabel.Text = 'Locked: None'
-        end
+        local targetPlayer, targetPart = getCamLockTargetToUse()
+        setCamLockTarget(targetPlayer, targetPart)
     else
         lastLockedPlayer = nil
         currentCamLockTargetPart = nil
@@ -2112,67 +2131,56 @@ game:GetService("RunService").Heartbeat:Connect(function()
     end
 end)
 
--- Camera lock: keep camera aimed at locked player's target while allowing normal mouse movement
-local lastMouseDelta = Vector2.new(0, 0)
-local mouseMoveCooldown = 0
-
-game:GetService('RunService').RenderStepped:Connect(function()
-    if _G.CamLock_Enabled then
-        local mouseDelta = UIS:GetMouseDelta()
-        lastMouseDelta = mouseDelta
-        mouseMoveCooldown = math.max(0, mouseMoveCooldown - 1)
-
-        if mouseDelta.Magnitude > 0.01 then
-            mouseMoveCooldown = 8
-            lastCamLockDir = cam.CFrame.LookVector
-            if lockedLabel then
-                lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
-            end
-            return
-        end
-
-        if mouseMoveCooldown > 0 then
-            if lockedLabel then
-                lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
-            end
-            return
-        end
-
-        if lastLockedPlayer and currentCamLockTargetPart then
-            local humanoid = lastLockedPlayer.Character and lastLockedPlayer.Character:FindFirstChild('Humanoid')
-            if humanoid and humanoid.Health > 0 and currentCamLockTargetPart and currentCamLockTargetPart.Parent then
-                local targetDir = (currentCamLockTargetPart.Position - cam.CFrame.Position)
-                if targetDir.Magnitude > 0 then
-                    targetDir = targetDir.Unit
-                    local smoothness = math.clamp(_G.CamLock_Smoothness or 0.2, 0.1, 1)
-                    local t = (smoothness - 0.1) / 0.9
-                    local alpha = 0.01 + 0.99 * (t * t * t)
-                    if not lastCamLockDir then
-                        lastCamLockDir = cam.CFrame.LookVector
-                    end
-                    local blended = (lastCamLockDir * (1 - alpha) + targetDir * alpha)
-                    if blended.Magnitude > 0 then
-                        lastCamLockDir = blended.Unit
-                        cam.CFrame = CFrame.new(cam.CFrame.Position, cam.CFrame.Position + lastCamLockDir)
-                    end
-                    if lockedLabel then
-                        lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer.DisplayName or lastLockedPlayer.Name)
-                    end
-                    return
-                end
-            end
-        end
-
+-- Camera lock: keep the camera aimed at the locked target without breaking on small mouse movement
+local function updateCamLockFrame()
+    if not _G.CamLock_Enabled then
         if lockedLabel then
-            lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
+            lockedLabel.Text = 'Locked: None'
         end
         return
     end
 
-    if lockedLabel then
-        lockedLabel.Text = 'Locked: None'
+    if lastLockedPlayer and currentCamLockTargetPart then
+        local humanoid = lastLockedPlayer.Character and lastLockedPlayer.Character:FindFirstChild('Humanoid')
+        if humanoid and humanoid.Health > 0 and currentCamLockTargetPart and currentCamLockTargetPart.Parent then
+            local targetPos = currentCamLockTargetPart.Position
+            local camPos = cam.CFrame.Position
+            local targetDir = targetPos - camPos
+            if targetDir.Magnitude > 0 then
+                targetDir = targetDir.Unit
+                local smoothness = math.clamp(_G.CamLock_Smoothness or 0.2, 0.1, 1)
+                local t = (smoothness - 0.1) / 0.9
+                local alpha = 0.01 + 0.99 * (t * t * t)
+                local currentLook = cam.CFrame.LookVector
+                if currentLook.Magnitude > 0 then
+                    currentLook = currentLook.Unit
+                else
+                    currentLook = targetDir
+                end
+                local blended = currentLook:Lerp(targetDir, alpha)
+                if blended.Magnitude > 0 then
+                    lastCamLockDir = blended.Unit
+                    cam.CFrame = CFrame.new(camPos, camPos + lastCamLockDir)
+                end
+                if lockedLabel then
+                    lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer.DisplayName or lastLockedPlayer.Name)
+                end
+                return
+            end
+        end
     end
-end)
+
+    local targetPlayer, targetPart = getCamLockTargetForCursor()
+    if targetPlayer and targetPart then
+        setCamLockTarget(targetPlayer, targetPart)
+    else
+        if lockedLabel then
+            lockedLabel.Text = 'Locked: ' .. (lastLockedPlayer and (lastLockedPlayer.DisplayName or lastLockedPlayer.Name) or 'None')
+        end
+    end
+end
+
+game:GetService('RunService').RenderStepped:Connect(updateCamLockFrame)
 
 local uiVisible = true
 UIS.InputBegan:Connect(function(input, gpe)
