@@ -324,8 +324,8 @@ for name, page in pairs(tabs) do
 end
 
 local tabButtons = {}
-local tabNames = {"Silent Aim", "CamLock", "Settings"}
-local tabKeys = {"SilentAim", "CamLock", "Settings"}
+local tabNames = {"Silent Aim", "CamLock", "Avatar", "Settings"}
+local tabKeys = {"SilentAim", "CamLock", "Avatar", "Settings"}
 
 local function switchTab(targetKey)
     for key, page in pairs(tabs) do
@@ -1721,14 +1721,27 @@ local function applyHeadlessState(character)
     local head = character:FindFirstChild("Head")
     if not head or not head:IsA("BasePart") then return end
 
-    local enabled = _G.Headless_Enabled
-    head.Transparency = enabled and 1 or 0
-    head.LocalTransparencyModifier = enabled and 1 or 0
-
-    if enabled then
-        head.Material = Enum.Material.ForceField
+    if _G.Headless_Enabled then
+        -- visually remove the head (non-destructive) so Motor6D/attachments stay intact
+        head.Transparency = 1
+        pcall(function() head.LocalTransparencyModifier = 1 end)
+        head.CanCollide = false
+        -- hide any decals (face)
+        for _, c in ipairs(head:GetChildren()) do
+            if c:IsA('Decal') or c:IsA('Texture') then
+                pcall(function() c.Transparency = 1 end)
+            end
+        end
     else
-        head.Material = Enum.Material.SmoothPlastic
+        -- restore appearance
+        head.Transparency = 0
+        pcall(function() head.LocalTransparencyModifier = 0 end)
+        head.CanCollide = true
+        for _, c in ipairs(head:GetChildren()) do
+            if c:IsA('Decal') or c:IsA('Texture') then
+                pcall(function() c.Transparency = 0 end)
+            end
+        end
     end
 end
 
